@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 Web BLE App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="">
+</head>
+<body>
+  <h1>ESP32 Web BLE Application</h1>
+  <button id="connectBleButton">Connect to BLE Device</button>
+  <button id="disconnectBleButton">Disconnect BLE Device</button>
+  <p>BLE state: <strong><span id="bleState" style="color:#d13a30;">Disconnected</span></strong></p>
+  <h2>Fetched Value</h2>
+  <p>Battery Level: <span id="batteryLevel"></span>%</p>
+  <p>Firmware Version: <span id="firmwareVersion"></span></p>
+  <p>Hardware Version: <span id="hardwareVersion"></span></p>
+  <p>Last reading: <span id="timestamp"></span></p><h2>Set Number of Shots</h2>   
+  <!-- Input field for number of shots -->
+<input type="number" id="inputShots" value="" style="width: 50px;">
+
+<!-- To display the number of shots written -->
+<p>number of shots: <span id="numberofshots"></span></p>
+
+  
+  <p><a href="https://randomnerdtutorials.com/">Created by RandomNerdTutorials.com</a></p>
+  <p><a href="https://RandomNerdTutorials.com/esp32-web-bluetooth/">Read the full project here.</a></p>
+</body>
+<script>
+    // DOM Elements
+    const connectButton = document.getElementById('connectBleButton');
+    const disconnectButton = document.getElementById('disconnectBleButton');
+    const onButton = document.getElementById('onButton');
+    const offButton = document.getElementById('offButton');
+    const retrievedValue = document.getElementById('valueContainer');
+    const latestValueSent = document.getElementById('valueSent');
+    const bleStateContainer = document.getElementById('bleState');
+    const timestampContainer = document.getElementById('timestamp');
+    const batteryLevelContainer = document.getElementById('batteryLevel');
+    const firmwareVersionContainer = document.getElementById('firmwareVersion');
+    const hardwareVersionContainer = document.getElementById('hardwareVersion');
+    const numberofshotsContainer = document.getElementById('numberofshots');
+    const shotsInput = document.getElementById('inputShots');
+    const writeShotsButton = document.getElementById('writeShotsButton');
+    
+
+
+    //Define BLE Device Specs
+    var deviceName ='MAPANA 0001';
+    var deviceNameService = '00001800-0000-1000-8000-00805f9b34fb'; // Device Name Service UUID
+    var deviceNameCharacteristic = '00002a00-0000-1000-8000-00805f9b34fb'; // Device Name Characteristic UUID
+   // var bleService = '19b10000-e8f2-537e-4f6c-d104768a1214';
+    var bleService = '00001800-0000-1000-8000-00805f9b34fb';
+    //var ledCharacteristic = '19b10002-e8f2-537e-4f6c-d104768a1214';
+    //var sensorCharacteristic= '19b10001-e8f2-537e-4f6c-d104768a1214';
+    var batteryService = '0000180f-0000-1000-8000-00805f9b34fb'; // Battery Service UUID
+    var batteryLevelCharacteristic = '00002a19-0000-1000-8000-00805f9b34fb'; // Battery Level Characteristic UUID
+    var firmwareService = '0000180a-0000-1000-8000-00805f9b34fb'; // Device Information Service UUID
+    var firmwareCharacteristic = '00002a26-0000-1000-8000-00805f9b34fb'; // Firmware Revision Characteristic UUID
+    var hardwareCharacteristic = '00002a27-0000-1000-8000-00805f9b34fb';
+    var hardwareService = '0000180a-0000-1000-8000-00805f9b34fb';
+    var numberofshotsService = '00006e00-0000-1000-8000-00805f9b34fb';
+    var numberofshotscharacteristics = '00006e03-0000-1000-8000-00805f9b34fb';
+    
+    
+    
+    //Global Variables to Handle Bluetooth
+    var bleServer;
+    var bleServiceFound;
+    //var sensorCharacteristicFound;
+    var batteryCharacteristicFound;
+    var firmwareCharacteristicFound;
+    var hardwareCharacteristicFound;
+    var numberofshotscharacteristicsFound;
+    
+    // Connect Button (search for BLE Devices only if BLE is available)
+    connectButton.addEventListener('click', (event) => {
+        if (isWebBluetoothEnabled()){
+            connectToDevice();
+        }
+    });
+
+    writeShotsButton.addEventListener('click', () => {
+    const numberOfShots = parseInt(shotsInput.value); // Get the value from the input field
+    if (isNaN(numberOfShots) || numberOfShots < 1 || numberOfShots > 25) {
+        window.alert("Please enter a valid number of shots between 0 and 25.");
+        return;
+    }
+    writeNumberOfShots(numberOfShots); // Call the function to write the value
+});
+
+
+
+    // Disconnect Button
+    disconnectButton.addEventListener('click', disconnectDevice);
+    
+    // Write to the ESP32 LED Characteristic
+    //onButton.addEventListener('click', () => writeOnCharacteristic(1));
+    //offButton.addEventListener('click', () => writeOnCharacteristic(0));
+
+    // Check if BLE is available in your Browser
+    function isWebBluetoothEnabled() {
+        if (!navigator.bluetooth) {
+            console.log("Web Bluetooth API is not available in this browser!");
+            bleStateContainer.innerHTML = "Web Bluetooth API is not available in this browser!";
+            return false
+        }
+        console.log('Web Bluetooth API supported in this browser.');
+        return true
+    }
+    // Connect to BLE Device and Enable Notifications
+    function connectToDevice(){
+        console.log('Initializing Bluetooth...');
+        navigator.bluetooth.requestDevice({
+            acceptAllDevices:true,
+            optionalServices: [bleService, batteryService,firmwareService,hardwareService,numberofshotsService]
+
+        })
+    
+        .then(device => {
+            console.log('Device Selected:', device.name);
+            bleStateContainer.innerHTML = 'Connected to device ' + device.name;
+            bleStateContainer.style.color = "#24af37";
+            device.addEventListener('gattservicedisconnected', onDisconnected);
+            return device.gatt.connect();
+        })
+        .then(gattServer =>{
+            bleServer = gattServer;
+            console.log("Connected to GATT Server");
+            return bleServer.getPrimaryService(bleService);
+        })
+      /*  .then(service => {
+            bleServiceFound = service;
+            console.log("Service discovered:", service.uuid);
+            //return service.getCharacteristic(sensorCharacteristic);
+        }) */
+        .then(characteristic => {
+            console.log("Characteristic discovered:", characteristic.uuid);
+            //sensorCharacteristicFound = characteristic;
+            //characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicChange);
+           // characteristic.startNotifications();
+            console.log("Notifications Started.");
+            //return characteristic.readValue();
+        })
+        .then(() => {
+            return bleServer.getPrimaryService(firmwareService);
+        })
+        .then(service => {
+            console.log("Firmware Service discovered:", service.uuid);
+            return service.getCharacteristic(firmwareCharacteristic);
+        })
+        .then(characteristic => {
+            firmwareCharacteristicFound = characteristic;
+            console.log("Firmwareservice Characteristic discovered:", characteristic.uuid);
+            console.log("firmware value is:",characteristic.value)
+            return characteristic.readValue();
+        })
+        .then(value => {
+    if (value && value.byteLength > 0) {
+        // Use TextDecoder to decode the value as a UTF-8 string
+        const decoder = new TextDecoder('utf-8');
+        const firmwarev = decoder.decode(value);
+        console.log("Firmware Version:", firmwarev);
+        firmwareVersionContainer.innerHTML = firmwarev;
+        timestampContainer.innerHTML = getDateTime();
+    } else {
+        console.error('Error: Firmware characteristic read returned an empty value');
+        firmwareVersionContainer.innerHTML = "ERROR";
+    }
+})
+
+
+        .then(value => {
+            console.log("Read value: ", value);
+            const decodedValue = new TextDecoder().decode(value);
+            console.log("Decoded value: ", decodedValue);
+           // retrievedValue.innerHTML = decodedValue;
+        })
+        .then(() => {
+            return bleServer.getPrimaryService(batteryService);
+        })
+        .then(service => {
+            console.log("Battery Service discovered:", service.uuid);
+            return service.getCharacteristic(batteryLevelCharacteristic);
+        })
+        .then(characteristic => {
+            batteryCharacteristicFound = characteristic;
+            console.log("Battery Characteristic discovered:", characteristic.uuid);
+            console.log("battery value is:",characteristic.value)
+            return characteristic.readValue();
+        })
+        .then(value => {
+            if (value && value.byteLength > 0) {
+            const batteryLevel = value.getUint8(0);
+            console.log("Battery Level:", batteryLevel);
+            batteryLevelContainer.innerHTML = batteryLevel;
+            timestampContainer.innerHTML = getDateTime();
+             } else {
+        console.error('Error: Battery level characteristic read returned an empty value');
+        batteryLevelContainer.innerHTML = "ERROR";
+    }
+})
+        .catch(error => {
+            //console.log('Error: ', error);
+            console.error('Error reading battery level: ', error);
+            batteryLevelContainer.innerHTML = "Error";
+        })
+        .then(() => {
+            return bleServer.getPrimaryService(hardwareService);
+        })
+        .then(service => {
+            console.log("hardware Service discovered:", service.uuid);
+            return service.getCharacteristic(hardwareCharacteristic);
+        })
+.then(characteristic => {
+            hardwareCharacteristicFound = characteristic;
+            console.log("hardware Characteristic discovered:", characteristic.uuid);
+            console.log("hardware value is:",characteristic.value)
+            return characteristic.readValue();
+        })
+        .then(value => {
+    if (value && value.byteLength > 0) {
+        // Use TextDecoder to decode the value as a UTF-8 string
+        const decoder = new TextDecoder('utf-8');
+        const hardwarev = decoder.decode(value);
+        console.log("hardware Version:", hardwarev);
+        hardwareVersionContainer.innerHTML =hardwarev;
+        timestampContainer.innerHTML = getDateTime();
+    } else {
+        console.error('Error: hardware characteristic read returned an empty value');
+        hardwareVersionContainer.innerHTML = "ERROR";
+    }
+})
+
+
+.then(() => {
+            return bleServer.getPrimaryService(numberofshotsService);
+        })
+        .then(service => {
+            console.log("number of shots Service discovered:", service.uuid);
+            return service.getCharacteristic(numberofshotscharacteristics);
+        })
+        .then(characteristic => {
+            numberofshotscharacteristicsFound = characteristic;
+            console.log("number of shots service Characteristic discovered:", characteristic.uuid);
+            console.log("number of shots value is:",characteristic.value)
+            return characteristic.readValue();
+        })
+        .then(value => {
+    if (value && value.byteLength > 0) {
+        // Use TextDecoder to decode the value as a UTF-8 string
+        const decoder = new TextDecoder('utf-8');
+        const shots = value.getUint8(0);
+        console.log("number of shots:", shots);
+        numberofshotsContainer.innerHTML = shots;
+        timestampContainer.innerHTML = getDateTime();
+    } else {
+        console.error('Error: number of shots characteristic read returned an empty value');
+       numberofshotsContainer.innerHTML = "ERROR";
+    }
+})
+
+//.then(value => {
+   // console.log("Read value: ", value);
+    //const decodedValue = new TextDecoder().decode(value);
+    //console.log("Decoded value: ", decodedValue);
+   // retrievedValue.innerHTML = decodedValue;
+//})
+
+function writeNumberOfShots(numberOfShots) {
+    if (bleServer && bleServer.connected && numberofshotscharacteristicsFound) {
+        const shotsData = new Uint8Array([numberOfShots]); // Convert number to uint8_t format
+        numberofshotscharacteristicsFound.writeValue(shotsData) // Write the value to the characteristic
+        .then(() => {
+            console.log("Number of shots written:", numberOfShots);
+            // After writing, immediately read the value to ensure it's updated
+            return numberofshotscharacteristicsFound.readValue();
+        })
+        .then(value => {
+            if (value && value.byteLength > 0) {
+                const shots = value.getUint8(0); // Read the value back
+                console.log("Read back number of shots:", shots);
+                numberofshotsContainer.innerHTML = shots; // Update the UI with the read value
+                timestampContainer.innerHTML = getDateTime(); // Update the timestamp
+            } else {
+                console.error('Error: Number of shots characteristic read returned an empty value');
+                numberofshotsContainer.innerHTML = "ERROR";
+            }
+        })
+        .catch(error => {
+            console.error("Error writing or reading the number of shots:", error);
+            window.alert("Error: " + error);
+        });
+    } else {
+        console.error("BLE not connected or characteristic not found. Cannot write the number of shots.");
+        window.alert("BLE not connected. Please connect to BLE before writing.");
+    }
+}
+
+
+
+function onDisconnected(event){
+        console.log('Device Disconnected:', event.target.device.name);
+        bleStateContainer.innerHTML = "Device disconnected";
+        bleStateContainer.style.color = "#d13a30";
+
+        connectToDevice();
+    }
+
+
+
+    }
+
+    function writeOnCharacteristic(value){
+       if (bleServer && bleServer.connected) {
+            bleServiceFound.getCharacteristic(ledCharacteristic)
+            .then(characteristic => {
+                console.log("Found the LED characteristic: ", characteristic.uuid);
+                const data = new Uint8Array([value]);
+                return characteristic.writeValue(data);
+           })
+            .then(() => {
+                latestValueSent.innerHTML = value;
+                console.log("Value written to LEDcharacteristic:", value);
+           })
+            .catch(error => {
+               console.error("Error writing to the LED characteristic: ", error);
+            });
+        } else {
+            console.error ("Bluetooth is not connected. Cannot write to characteristic.")
+            window.alert("Bluetooth is not connected. Cannot write to characteristic. \n Connect to BLE first!")
+        }
+    }
+
+    function disconnectDevice() {
+        console.log("Disconnect Device.");
+        if (bleServer && bleServer.connected) {
+            bleServer.disconnect();  // Disconnect the device directly
+        console.log("Device Disconnected");
+        bleStateContainer.innerHTML = "Device Disconnected";
+        bleStateContainer.style.color = "#d13a30";
+    } else {
+        console.error("Bluetooth is not connected.");
+        window.alert("Bluetooth is not connected.");
+    }
+}
+            //if (sensorCharacteristicFound) {
+              //  sensorCharacteristicFound.stopNotifications()
+                //    .then(() => {
+                  //      console.log("Notifications Stopped");
+                    //    return bleServer.disconnect();
+                    //})
+                    //.then(() => {
+                       // console.log("Device Disconnected");
+                       // bleStateContainer.innerHTML = "Device Disconnected";
+                       // bleStateContainer.style.color = "#d13a30";
+
+                    //})
+                    //.catch(error => {
+                        //console.log("An error occurred:", error);
+                    //});
+          //  } else {
+            //    console.log("No characteristic found to disconnect.");
+           // }
+       // } else {
+            // Throw an error if Bluetooth is not connected
+            //console.error("Bluetooth is not connected.");
+           // window.alert("Bluetooth is not connected.")
+        //}
+   // }
+
+
+
+
+   function handleCharacteristicChange(event){
+        const newValueReceived = new TextDecoder().decode(event.target.value);
+     console.log("Characteristic value changed: ", newValueReceived);
+        retrievedValue.innerHTML = newValueReceived;
+
+    }
+
+    function getDateTime() {
+        var currentdate = new Date();
+        var day = ("00" + currentdate.getDate()).slice(-2); // Convert day to string and slice
+        var month = ("00" + (currentdate.getMonth() + 1)).slice(-2);
+        var year = currentdate.getFullYear();
+        var hours = ("00" + currentdate.getHours()).slice(-2);
+        var minutes = ("00" + currentdate.getMinutes()).slice(-2);
+        var seconds = ("00" + currentdate.getSeconds()).slice(-2);
+
+        var datetime = day + "/" + month + "/" + year + " at " + hours + ":" + minutes + ":" + seconds;
+        return datetime;
+    }
+</script>
+</html>
